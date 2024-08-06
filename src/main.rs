@@ -1,9 +1,20 @@
-use gix::diff::object::bstr::BStr;
+use flate2::bufread::GzDecoder;
+use std::time::Instant;
+use tar::Archive;
+use tracing::info;
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
+
+// Ideas for reducing amount of downloaded data:
+//
+// http query for most downloaded crates: https://crates.io/api/v1/crates?per_page=100&page=1&sort=recent-downloads
+// curated list crates from rust playground: https://github.com/rust-lang/rust-playground/blob/9ba74ff/compiler/base/Cargo.toml
+// download tarball of crates io index: https://github.com/rust-lang/crates.io-index/tarball/master
+//
+// Currently whole index takes few minutes to donwload
 
 fn init_logger() {
     let filter = EnvFilter::builder()
-        .with_default_directive(LevelFilter::WARN.into())
+        .with_default_directive(LevelFilter::INFO.into())
         .from_env_lossy();
 
     tracing_subscriber::fmt()
@@ -13,35 +24,24 @@ fn init_logger() {
         .init();
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     init_logger();
 
-    let url = gix::url::parse(BStr::new(
-        "https://github.com/rust-lang/crates.io-index.git",
-    ))?;
-
-    println!("Url: {:?}", url.to_bstring());
-    let mut prepare_clone = gix::prepare_clone(url, &"./banana")?;
-
-    println!("Cloning crates index into here ...");
-    let (mut prepare_checkout, _) = prepare_clone
-        .fetch_then_checkout(gix::progress::Discard, &gix::interrupt::IS_INTERRUPTED)?;
-
-    println!(
-        "Checking out into {:?} ...",
-        prepare_checkout.repo().work_dir().expect("should be there")
+    info!("Start downloading crates io index");
+    let start = Instant::now();
+    let body = reqwest::get("https://github.com/rust-lang/crates.io-index/tarball/master")
+        .await?
+        .bytes()
+        .await?
+        .to_vec();
+    let tar = GzDecoder::new(&body[..]);
+    let mut archive = Archive::new(tar);
+    archive.unpack(".")?;
+    info!(
+        "Crates io index on the file system in: {:?}",
+        start.elapsed()
     );
-
-    let (repo, _) =
-        prepare_checkout.main_worktree(gix::progress::Discard, &gix::interrupt::IS_INTERRUPTED)?;
-    println!(
-        "Repo cloned into {:?}",
-        repo.work_dir().expect("directory pre-created")
-    );
-
-    let _remote = repo
-        .find_default_remote(gix::remote::Direction::Fetch)
-        .expect("always present after clone")?;
 
     Ok(())
 }
