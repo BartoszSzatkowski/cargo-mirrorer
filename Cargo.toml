@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.86"
-clap = "4.5.11"
+clap = { version = "4.5.11", features = ["derive"] }
 flate2 = { version = "1.0.31", features = ["zlib-ng"] }
 reqwest = "0.12.5"
 tar = "0.4.41"

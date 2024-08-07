@@ -1,3 +1,4 @@
+use clap::Parser;
 use flate2::bufread::GzDecoder;
 use std::time::Instant;
 use tar::Archive;
@@ -10,7 +11,15 @@ use tracing_subscriber::filter::{EnvFilter, LevelFilter};
 // curated list crates from rust playground: https://github.com/rust-lang/rust-playground/blob/9ba74ff/compiler/base/Cargo.toml
 // download tarball of crates io index: https://github.com/rust-lang/crates.io-index/tarball/master
 //
-// Currently whole index takes few minutes to donwload
+// Currently whole index takes few minutes to download
+
+/// Mirror crates io
+#[derive(Debug, Parser)]
+pub struct Config {
+    /// Directory where downloaded .crate files will be saved to.
+    #[arg(short = 'F', long = "fetch-plan", value_name = "PLAN")]
+    pub path: String,
+}
 
 fn init_logger() {
     let filter = EnvFilter::builder()
@@ -28,6 +37,10 @@ fn init_logger() {
 async fn main() -> anyhow::Result<()> {
     init_logger();
 
+    Ok(())
+}
+
+async fn _download_crates_io_index() -> anyhow::Result<()> {
     info!("Start downloading crates io index");
     let start = Instant::now();
     let body = reqwest::get("https://github.com/rust-lang/crates.io-index/tarball/master")
