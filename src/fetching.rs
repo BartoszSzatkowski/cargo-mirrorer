@@ -9,7 +9,7 @@ pub enum FetchPlan {
 impl TryFrom<String> for FetchPlan {
     type Error = String;
 
-    fn try_from(value: String) -> Result<Self, Self::Error> {
+    fn try_from(value: String) -> anyhow::Result<Self, Self::Error> {
         match value.as_str() {
             "all" => Ok(Self::AllCrates),
             "playground" => Ok(Self::Playground),
