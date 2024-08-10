@@ -1,11 +1,14 @@
 use cargo_mirrorer::fetching::FetchPlan;
 use clap::Parser;
 use flate2::bufread::GzDecoder;
+use std::fs::File;
+use std::io::{self, BufRead};
+use std::path::Path;
 use std::time::Instant;
 use tar::Archive;
 use tracing::info;
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
-use walkdir::{DirEntry, WalkDir};
+use walkdir::WalkDir;
 
 // Ideas for reducing amount of downloaded data:
 //
@@ -29,11 +32,34 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Config::parse();
 
+    let mut tree = sonic_rs::PointerTree::new();
+    tree.add_path(&["name"]);
+    tree.add_path(&["vers"]);
+
     match FetchPlan::try_from(config.fetch_plan).unwrap() {
         FetchPlan::AllCrates => {
             // download_crates_io_index().await?;
-            for entry in WalkDir::new("./crates-index").min_depth(3).max_depth(3) {
-                println!("{}", entry?.path().display());
+            for entry in WalkDir::new("./crates-index")
+                .min_depth(3)
+                .max_depth(3)
+                .into_iter()
+                .take(5)
+            {
+                if let Ok(lines) = read_lines(entry?.path()) {
+                    // Consumes the iterator, returns an (Optional) String
+                    for line in lines.map_while(Result::ok) {
+                        let nodes = unsafe { sonic_rs::get_many_unchecked(&line, &tree) };
+                        let nodes = nodes.unwrap();
+                        println!("nodes 1 {}", nodes[0]);
+                        println!("nodes 2 {}", nodes[1]);
+                    }
+                }
+                // let body =
+                //     reqwest::get("https://github.com/rust-lang/crates.io-index/tarball/master")
+                //         .await?
+                //         .bytes()
+                //         .await?
+                //         .to_vec();
             }
         }
         _ => todo!(),
@@ -71,4 +97,12 @@ async fn download_crates_io_index() -> anyhow::Result<()> {
     );
 
     Ok(())
+}
+
+fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
+where
+    P: AsRef<Path>,
+{
+    let file = File::open(filename)?;
+    Ok(io::BufReader::new(file).lines())
 }
