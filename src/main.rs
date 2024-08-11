@@ -1,6 +1,7 @@
 use cargo_mirrorer::fetching::FetchPlan;
 use clap::Parser;
 use flate2::bufread::GzDecoder;
+use sonic_rs::JsonValueTrait;
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::Path;
@@ -38,10 +39,10 @@ async fn main() -> anyhow::Result<()> {
 
     match FetchPlan::try_from(config.fetch_plan).unwrap() {
         FetchPlan::AllCrates => {
-            // download_crates_io_index().await?;
+            download_crates_io_index().await?;
             for entry in WalkDir::new("./crates-index")
-                .min_depth(3)
-                .max_depth(3)
+                .min_depth(4)
+                .max_depth(4)
                 .into_iter()
                 .take(5)
             {
@@ -50,16 +51,17 @@ async fn main() -> anyhow::Result<()> {
                     for line in lines.map_while(Result::ok) {
                         let nodes = unsafe { sonic_rs::get_many_unchecked(&line, &tree) };
                         let nodes = nodes.unwrap();
-                        println!("nodes 1 {}", nodes[0]);
-                        println!("nodes 2 {}", nodes[1]);
+                        let crate_name = nodes[0].as_str().unwrap();
+                        let crate_version = nodes[1].as_str().unwrap();
+                        let crate_filename =
+                            format!("./crates/{}-{}.crate", crate_name, crate_version);
+                        let url_string = format!(
+                            "https://static.crates.io/crates/{crate_name}/{crate_name}-{crate_version}.crate",
+                        );
+                        let body = reqwest::get(url_string).await?.bytes().await?;
+                        std::fs::write(crate_filename, body)?;
                     }
                 }
-                // let body =
-                //     reqwest::get("https://github.com/rust-lang/crates.io-index/tarball/master")
-                //         .await?
-                //         .bytes()
-                //         .await?
-                //         .to_vec();
             }
         }
         _ => todo!(),
@@ -90,7 +92,7 @@ async fn download_crates_io_index() -> anyhow::Result<()> {
         .to_vec();
     let tar = GzDecoder::new(&body[..]);
     let mut archive = Archive::new(tar);
-    archive.unpack(".")?;
+    archive.unpack("crates-index")?;
     info!(
         "Crates io index on the file system in: {:?}",
         start.elapsed()
