@@ -1,13 +1,13 @@
 use cargo_mirrorer::fetching::FetchPlan;
-use futures::stream::StreamExt;
-use parking_lot::Mutex;
 use clap::Parser;
 use flate2::bufread::GzDecoder;
+use futures::stream::StreamExt;
+use parking_lot::Mutex;
 use rayon::ThreadPoolBuilder;
 use sonic_rs::JsonValueTrait;
 use std::fs::File;
 use std::io::{self, BufRead};
-use std::num::{NonZeroU32, NonZeroUsize};
+use std::num::NonZeroUsize;
 use std::path::Path;
 use std::thread;
 use std::time::Instant;
@@ -90,41 +90,53 @@ async fn download_crates_in_index() -> anyhow::Result<()> {
     let num_threads = thread::available_parallelism().map_or(1, NonZeroUsize::get);
     let thread_pool = ThreadPoolBuilder::new().num_threads(num_threads).build()?;
 
-    let krates = Mutex::new(Vec::with_capacity(150_000));
+    let krates = Mutex::new(Vec::with_capacity(1_500_000));
 
     let mut tree = sonic_rs::PointerTree::new();
     tree.add_path(&["name"]);
     tree.add_path(&["vers"]);
 
+    let start = Instant::now();
+
+    info!("Start extracting data about crates");
     thread_pool.in_place_scope(|scope| {
-    for entry in WalkDir::new("./crates-index")
-        .min_depth(3)
-        .max_depth(4)
-        .into_iter()
-        .filter_entry(is_file)
-        .take(100)
-    {
+        for entry in WalkDir::new("./crates-index")
+            .min_depth(3)
+            .max_depth(4)
+            .into_iter()
+            .filter_entry(|e| !is_hidden(e))
+            .filter(is_file)
+        {
             scope.spawn(|_scope| {
-        if let Ok(lines) = read_lines(entry.unwrap().path()) {
-            // Consumes the iterator, returns an (Optional) String
-            for line in lines.map_while(Result::ok) {
-                let nodes = unsafe { sonic_rs::get_many_unchecked(&line, &tree) };
-                let nodes = nodes.unwrap();
-                let crate_name = nodes[0].as_str().unwrap();
-                let crate_version = nodes[1].as_str().unwrap();
-                let krate = Krate { 
-                    path: format!("./crates/{}-{}.crate", crate_name, crate_version),
-                    url: format!(
-                            "https://static.crates.io/crates/{crate_name}/{crate_name}-{crate_version}.crate",
-                        )
-                };
-                krates.lock().push(krate);
-            }
-        }});
-    }});
+                let entry = entry.unwrap();
+                let path = entry.path();
+            if let Ok(lines) = read_lines(path) {
+                // Consumes the iterator, returns an (Optional) String
+                for line in lines.map_while(Result::ok) {
+                    let nodes = unsafe { sonic_rs::get_many_unchecked(&line, &tree) };
+                    let Ok(nodes) = nodes else {
+                        continue;
+                    };
+                    let crate_name = nodes[0].as_str().unwrap();
+                    let crate_version = nodes[1].as_str().unwrap();
+                    let krate = Krate {
+                        path: format!("./crates/{}-{}.crate", crate_name, crate_version),
+                        url: format!(
+                                "https://static.crates.io/crates/{crate_name}/{crate_name}-{crate_version}.crate",
+                            )
+                    };
+                    krates.lock().push(krate);
+                }
+            }});
+        }
+    });
+    info!("Crates info extracted in: {:?}", start.elapsed());
 
     let v = krates.into_inner().into_iter().map(download_crate);
-    futures::stream::iter(v).buffer_unordered(5).collect::<Vec<_>>().await;
+    futures::stream::iter(v)
+        .buffer_unordered(5)
+        .collect::<Vec<_>>()
+        .await;
 
     Ok(())
 }
@@ -132,9 +144,8 @@ async fn download_crates_in_index() -> anyhow::Result<()> {
 async fn download_crate(krate: Krate) -> anyhow::Result<()> {
     let body = reqwest::get(krate.url.clone()).await?.bytes().await?;
     std::fs::write(krate.path.clone(), body)?;
-    
-    Ok(())
 
+    Ok(())
 }
 
 fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
@@ -145,7 +156,18 @@ where
     Ok(io::BufReader::new(file).lines())
 }
 
-fn is_file(dir_entry: &DirEntry) -> bool {
+fn is_hidden(entry: &DirEntry) -> bool {
+    entry
+        .file_name()
+        .to_str()
+        .map(|s| s.starts_with("."))
+        .unwrap_or(false)
+}
+
+fn is_file(dir_entry: &Result<walkdir::DirEntry, walkdir::Error>) -> bool {
+    let Ok(dir_entry) = dir_entry else {
+        return false;
+    };
     let Ok(ent) = dir_entry.metadata() else {
         return false;
     };
