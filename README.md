@@ -9,10 +9,16 @@ Tool for replication of crates and serving them in a way replicating crates io. 
 - [ ] Scheduled updates
 - [ ] Update on network connection available + delay
 
-## Crates backup fetching:
+## Crates fetching:
 
-- [ ] All crates (200GB and growing)
+- [x] All crates (200GB and growing)
 - [ ] Top N downloaded crates and their deps
 - [ ] Use deps of rust playground
 - [ ] Comma separated list of crates
 - [ ] Crates from specified Cargo.toml file
+
+## Replicating crates io api
+
+- [ ] Git index
+- [ ] Sparse index
+- [ ] Serving crates
