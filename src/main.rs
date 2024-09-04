@@ -1,21 +1,15 @@
+use bytes::Bytes;
 use cargo_mirrorer::fetching::FetchPlan;
 use cargo_mirrorer::serving::ServingPlan;
 use clap::Parser;
-use flate2::bufread::GzDecoder;
-use futures::stream::StreamExt;
-use parking_lot::Mutex;
-use rayon::ThreadPoolBuilder;
-use sonic_rs::JsonValueTrait;
-use std::fs::File;
-use std::io::{self, BufRead};
-use std::num::NonZeroUsize;
-use std::path::Path;
-use std::thread;
-use std::time::Instant;
-use tar::Archive;
-use tracing::info;
+use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
+use hyper::server::conn::http2;
+use hyper::service::service_fn;
+use hyper::{Method, Request, Response, StatusCode};
+use hyper_util::rt::TokioIo;
+use std::net::SocketAddr;
+use tokio::net::TcpListener;
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
-use walkdir::{DirEntry, WalkDir};
 
 // Ideas for reducing amount of downloaded data:
 //
@@ -30,14 +24,14 @@ use walkdir::{DirEntry, WalkDir};
 pub struct Config {
     /// Protocol to use for serving info about crates
     #[arg(short = 'S', long = "serve", value_name = "git|sparse")]
-    pub fetch_plan: String,
+    pub serving: String,
     /// Crates that should be fetched for mirrorer to host
     #[arg(
         short = 'F',
         long = "fetch",
         value_name = "all|playground|n<number>|<comma separated list>"
     )]
-    pub fetch_plan: String,
+    pub fetching: String,
 }
 
 #[tokio::main]
@@ -46,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Config::parse();
 
-    match FetchPlan::try_from(config.fetch_plan)? {
+    match FetchPlan::try_from(config.fetching).unwrap() {
         FetchPlan::AllCrates => {
             // download_index_of_crates().await?;
             // download_crates_in_index().await?;
@@ -54,12 +48,28 @@ async fn main() -> anyhow::Result<()> {
         _ => todo!(),
     }
 
-    match ServingPlan::try_from(config.serving_plan)? {
+    match ServingPlan::try_from(config.serving).unwrap() {
         ServingPlan::Git => {}
         _ => todo!(),
     }
 
-    Ok(())
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+
+    let listener = TcpListener::bind(addr).await?;
+    println!("Listening on http://{}", addr);
+    loop {
+        let (stream, _) = listener.accept().await?;
+        let io = TokioIo::new(stream);
+
+        tokio::task::spawn(async move {
+            if let Err(err) = http2::Builder::new(LocalExec)
+                .serve_connection(io, service_fn(echo))
+                .await
+            {
+                println!("Error serving connection: {:?}", err);
+            }
+        });
+    }
 }
 
 fn init_logger() {
@@ -72,4 +82,49 @@ fn init_logger() {
         .without_time()
         .with_target(false)
         .init();
+}
+
+/// This is our service handler. It receives a Request, routes on its
+/// path, and returns a Future of a Response.
+async fn echo(
+    req: Request<hyper::body::Incoming>,
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+    match (req.method(), req.uri().path()) {
+        // Serve some instructions at /
+        (&Method::GET, "/") => Ok(Response::new(full(
+            "Try POSTing data to /echo such as: `curl localhost:3000/echo -XPOST -d \"hello world\"`",
+        ))),
+
+        // Return the 404 Not Found for other routes.
+        _ => {
+            let mut not_found = Response::new(empty());
+            *not_found.status_mut() = StatusCode::NOT_FOUND;
+            Ok(not_found)
+        }
+    }
+}
+
+fn empty() -> BoxBody<Bytes, hyper::Error> {
+    Empty::<Bytes>::new()
+        .map_err(|never| match never {})
+        .boxed()
+}
+
+fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
+    Full::new(chunk.into())
+        .map_err(|never| match never {})
+        .boxed()
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LocalExec;
+
+impl<F> hyper::rt::Executor<F> for LocalExec
+where
+    F: std::future::Future + 'static, // not requiring `Send`
+{
+    fn execute(&self, fut: F) {
+        // This will spawn into the currently running `LocalSet`.
+        tokio::task::spawn_local(fut);
+    }
 }

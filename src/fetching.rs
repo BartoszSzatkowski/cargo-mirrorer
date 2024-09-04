@@ -1,3 +1,18 @@
+use flate2::bufread::GzDecoder;
+use futures::stream::StreamExt;
+use parking_lot::Mutex;
+use rayon::ThreadPoolBuilder;
+use sonic_rs::JsonValueTrait;
+use std::fs::File;
+use std::io::{self, BufRead};
+use std::num::NonZeroUsize;
+use std::path::Path;
+use std::thread;
+use std::time::Instant;
+use tar::Archive;
+use tracing::info;
+use walkdir::{DirEntry, WalkDir};
+
 #[derive(Debug, PartialEq)]
 pub enum FetchPlan {
     AllCrates,

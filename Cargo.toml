@@ -5,9 +5,13 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.86"
+bytes = "1.7.1"
 clap = { version = "4.5.11", features = ["derive"] }
 flate2 = { version = "1.0.31", features = ["zlib-ng"] }
 futures = "0.3.30"
+http-body-util = "0.1.2"
+hyper = { version = "1.4.1", features = ["http2", "server"] }
+hyper-util = "0.1.7"
 parking_lot = "0.12.3"
 rayon = "1.10.0"
 reqwest = "0.12.5"
