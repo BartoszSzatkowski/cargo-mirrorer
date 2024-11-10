@@ -3,15 +3,24 @@ use futures::stream::StreamExt;
 use parking_lot::Mutex;
 use rayon::ThreadPoolBuilder;
 use sonic_rs::JsonValueTrait;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::io::{self, BufRead};
 use std::num::NonZeroUsize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::thread;
 use std::time::Instant;
 use tar::Archive;
 use tracing::info;
 use walkdir::{DirEntry, WalkDir};
+
+const DEFAULT_INDEX_PATH: &str = "crates_index";
+const DEFAULT_CONFIG: &str = r#"
+{
+    "dl": "127.0.0.1:3000"
+}
+"#;
 
 #[derive(Debug, PartialEq)]
 pub enum FetchPlan {
@@ -45,7 +54,44 @@ pub async fn download_index_of_crates() -> anyhow::Result<()> {
         .to_vec();
     let tar = GzDecoder::new(&body[..]);
     let mut archive = Archive::new(tar);
-    archive.unpack("crates-index")?;
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        // we turst paths provided by crates.io-index - no filtering
+        let path: PathBuf = entry
+            .path()?
+            .components()
+            .skip(1) // strip top-level directory
+            .collect();
+        entry.unpack(Path::new(DEFAULT_INDEX_PATH).join(path))?;
+    }
+    // initialize index as a git repo
+    Command::new("git")
+        .arg("init")
+        .arg(format!("./{DEFAULT_INDEX_PATH}"))
+        .output()
+        .expect("failed to make index a git repo (git not available?)");
+    // create a file that allows the report to be used by git http server
+    File::create(format!("./{DEFAULT_INDEX_PATH}/.git/git-daemon-export-ok"))?;
+    // replace the config file in the base of the index
+    let mut conf_file = OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(format!("./{DEFAULT_INDEX_PATH}/config.json"))?;
+    conf_file.write_all(DEFAULT_CONFIG.as_bytes())?;
+    // create first commit
+    Command::new("git")
+        .current_dir(format!("./{DEFAULT_INDEX_PATH}"))
+        .arg("add")
+        .arg(".")
+        .output()
+        .expect("failed to make index a git repo (git not available?)");
+    Command::new("git")
+        .current_dir(format!("./{DEFAULT_INDEX_PATH}"))
+        .arg("commit")
+        .arg("-m")
+        .arg(r#""initial commit""#)
+        .output()
+        .expect("failed to make index a git repo (git not available?)");
     info!(
         "Crates io index on the file system in: {:?}",
         start.elapsed()
