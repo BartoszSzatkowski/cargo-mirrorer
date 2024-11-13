@@ -1,6 +1,5 @@
 use bytes::Bytes;
-use cargo_mirrorer::fetching::FetchPlan;
-use cargo_mirrorer::serving::ServingPlan;
+use cargo_mirrorer::fetching::plan::FetchPlan;
 use clap::Parser;
 use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
 use hyper::server::conn::http2;
@@ -8,6 +7,7 @@ use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use tokio::net::TcpListener;
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
 
@@ -23,8 +23,8 @@ use tracing_subscriber::filter::{EnvFilter, LevelFilter};
 #[derive(Debug, Parser)]
 pub struct Config {
     /// Protocol to use for serving info about crates
-    #[arg(short = 'S', long = "serve", value_name = "git|sparse")]
-    pub serving: String,
+    // #[arg(short = 'S', long = "serve", value_name = "git|sparse")]
+    // pub serving: String,
     /// Crates that should be fetched for mirrorer to host
     #[arg(
         short = 'F',
@@ -40,16 +40,11 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Config::parse();
 
-    match FetchPlan::try_from(config.fetching).unwrap() {
+    match FetchPlan::from_str(&config.fetching)? {
         FetchPlan::AllCrates => {
             // download_index_of_crates().await?;
             // download_crates_in_index().await?;
         }
-        _ => todo!(),
-    }
-
-    match ServingPlan::try_from(config.serving).unwrap() {
-        ServingPlan::Git => {}
         _ => todo!(),
     }
 

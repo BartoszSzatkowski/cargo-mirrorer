@@ -1,6 +1,8 @@
 # Cargo mirrorer
 
-Tool for replication of crates and serving them in a way replicating crates io. Usefull in offline and bad connection situations.
+Tool for dowloading crates and serving them, creating a local alternative for crates.io. Usefull in offline and bad connection situations.
+
+# This repo is under construction TODOs:
 
 ## Updating strategy:
 
@@ -19,6 +21,7 @@ Tool for replication of crates and serving them in a way replicating crates io. 
 
 ## Replicating crates io api
 
-- [ ] Git index
+- [x] Git - from full index
+- [ ] Git - lean index
 - [ ] Sparse index
 - [ ] Serving crates
