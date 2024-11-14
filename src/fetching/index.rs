@@ -1,5 +1,6 @@
-use super::constants::{DEFAULT_CONFIG, DEFAULT_INDEX_PATH};
+use super::constants::{DEFAULT_CONFIG, DEFAULT_INDEX_PATH, DEFAULT_SOURCE_INDEX};
 use super::plan::FetchPlan;
+use anyhow::{anyhow, Context};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
@@ -9,7 +10,8 @@ use tracing::info;
 
 pub struct IndexConfig {
     pub fetch_plan: FetchPlan,
-    pub index_path: Option<PathBuf>,
+    pub index_path: PathBuf,
+    pub source_index: String,
 }
 
 pub struct Index {
@@ -21,7 +23,8 @@ impl Default for Index {
     fn default() -> Self {
         Self::new(IndexConfig {
             fetch_plan: FetchPlan::AllCrates,
-            index_path: Some(PathBuf::from(DEFAULT_INDEX_PATH)),
+            index_path: PathBuf::from(DEFAULT_INDEX_PATH),
+            source_index: DEFAULT_SOURCE_INDEX.to_string(),
         })
     }
 }
@@ -34,18 +37,62 @@ impl Index {
         }
     }
 
-    // pub fn is_index_present() -> bool {}
-    // pub fn adheres_to_fetching_policy() -> bool {}
-    // pub fn check_readiness() {}
+    pub fn adheres_to_fetching_policy(&self) -> anyhow::Result<bool> {
+        if !self.config.index_path.exists() {
+            return Ok(false);
+        };
 
-    pub fn clone_full_main_index() {
+        if self.config.fetch_plan == FetchPlan::AllCrates {
+            self.check_index_main()?;
+        } else {
+            self.check_index_lean()?;
+        }
+
+        Ok(true)
+    }
+
+    fn check_index_main(&self) -> anyhow::Result<()> {
+        let out = Command::new("git")
+            .current_dir(&self.config.index_path)
+            .arg("config")
+            .arg("--get")
+            .arg("remote.origin.url")
+            .output()
+            .context("failed to extract origin url from index repo")?;
+
+        if String::from_utf8_lossy(&out.stdout) != self.config.source_index {
+            return Err(anyhow!(
+                "Origin of crate index is not matching specified source index [default: {}]",
+                DEFAULT_SOURCE_INDEX
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn check_index_lean(&self) -> anyhow::Result<()> {
+        // if fetch plan:
+
+        // is playground - download Cargo.toml of rust playground and extract crates
+
+        // is list - job done
+
+        // if N most popular - fetch those from crates api
+
+        // for all of the options - check dependencies
+        Ok(())
+    }
+
+    pub fn clone_full_main_index(&self) -> anyhow::Result<()> {
         Command::new("git")
             .arg("clone")
             .arg("--depth=1")
-            .arg("https://github.com/rust-lang/crates.io-index.git")
-            .arg(DEFAULT_INDEX_PATH)
+            .arg(&self.config.source_index)
+            .arg(&self.config.index_path)
             .output()
-            .expect("failed to fetch crates.io-index repo (git not available?)");
+            .context("failed to clone crates.io-index repo")?;
+
+        Ok(())
     }
 }
 

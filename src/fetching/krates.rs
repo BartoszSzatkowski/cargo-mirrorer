@@ -1,4 +1,5 @@
 use super::constants::{DEFAULT_CRATES_PATH, DEFAULT_INDEX_PATH};
+use super::util::{is_file, is_hidden};
 use futures::stream::StreamExt;
 use parking_lot::Mutex;
 use rayon::ThreadPoolBuilder;
@@ -10,7 +11,7 @@ use std::path::Path;
 use std::thread;
 use std::time::Instant;
 use tracing::info;
-use walkdir::{DirEntry, WalkDir};
+use walkdir::WalkDir;
 
 #[derive(Debug)]
 pub struct KratePath {
@@ -107,22 +108,4 @@ where
 {
     let file = File::open(filename)?;
     Ok(io::BufReader::new(file).lines())
-}
-
-fn is_hidden(entry: &DirEntry) -> bool {
-    entry
-        .file_name()
-        .to_str()
-        .map(|s| s.starts_with("."))
-        .unwrap_or(false)
-}
-
-fn is_file(dir_entry: &Result<walkdir::DirEntry, walkdir::Error>) -> bool {
-    let Ok(dir_entry) = dir_entry else {
-        return false;
-    };
-    let Ok(ent) = dir_entry.metadata() else {
-        return false;
-    };
-    ent.is_file()
 }
