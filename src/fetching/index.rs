@@ -14,6 +14,12 @@ pub struct IndexConfig {
     pub source_index: String,
 }
 
+pub enum IndexState {
+    Ready,
+    OutOfDate,
+    Invalid,
+}
+
 pub struct Index {
     pub ready: bool,
     pub config: IndexConfig,
@@ -42,10 +48,12 @@ impl Index {
             return Ok(false);
         };
 
-        if self.config.fetch_plan == FetchPlan::AllCrates {
-            self.check_index_main()?;
-        } else {
-            self.check_index_lean()?;
+        match &self.config.fetch_plan {
+            FetchPlan::AllCrates => self.check_index_main()?,
+            FetchPlan::List(l) => {
+                self.check_index_lean(l)?;
+            }
+            _ => todo!(),
         }
 
         Ok(true)
@@ -60,6 +68,8 @@ impl Index {
             .output()
             .context("failed to extract origin url from index repo")?;
 
+        // TODO: check when was the last pull performed by inspecting .git/FEATCH_HEAD file
+
         if String::from_utf8_lossy(&out.stdout) != self.config.source_index {
             return Err(anyhow!(
                 "Origin of crate index is not matching specified source index [default: {}]",
@@ -70,17 +80,36 @@ impl Index {
         Ok(())
     }
 
-    fn check_index_lean(&self) -> anyhow::Result<()> {
-        // if fetch plan:
+    fn check_index_lean(&self, required_cratres: &Vec<String>) -> anyhow::Result<()> {
+        todo!()
+    }
 
-        // is playground - download Cargo.toml of rust playground and extract crates
+    fn exists_in_index(&self, krate_name: &str) -> bool {
+        let index_display = self.config.index_path.display();
+        let path_to_krate = match krate_name.len() {
+            1 => PathBuf::from(format!("{}/1/{}", index_display, krate_name)),
+            2 => PathBuf::from(format!("{}/2/{}", index_display, krate_name)),
+            3 => {
+                let first_letter: String =
+                    krate_name.to_string().chars().nth(0).into_iter().collect();
+                PathBuf::from(format!(
+                    "{}/3/{}/{}",
+                    index_display, first_letter, krate_name
+                ))
+            }
+            _ => {
+                let c = krate_name.to_string();
+                let first_two: String = c.chars().take(2).collect();
+                let second_two: String = c.chars().skip(2).take(2).collect();
 
-        // is list - job done
+                PathBuf::from(format!(
+                    "{}/{}/{}/{}",
+                    index_display, first_two, second_two, krate_name
+                ))
+            }
+        };
 
-        // if N most popular - fetch those from crates api
-
-        // for all of the options - check dependencies
-        Ok(())
+        path_to_krate.is_file()
     }
 
     pub fn clone_full_main_index(&self) -> anyhow::Result<()> {
